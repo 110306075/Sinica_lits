@@ -3,3 +3,4 @@ venv/
 train_images/
 train_masks/
 models/
+fold_tumor_stats/
