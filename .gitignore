@@ -1,0 +1,5 @@
+*.csv
+venv/
+train_images/
+train_masks/
+models/
