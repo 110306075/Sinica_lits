@@ -4,3 +4,8 @@ train_images/
 train_masks/
 models/
 fold_tumor_stats/
+train_images_testOr/
+train_masks_testOr/
+train_masks_v2Window/
+train_images_v2Window/
+__pycache__/

@@ -16,22 +16,37 @@ from PIL import Image
 from matplotlib.pyplot import figure
 
 import torch
-from nibabel.orientations import aff2axcodes
+from nibabel.orientations import (
+    io_orientation, axcodes2ornt, ornt_transform, aff2axcodes
+)
 from fastai.basics import *
 from fastai.vision.all import *
 from fastai.data.transforms import *
 
-target_axcodes = ('L', 'A', 'S')
+TARGET_AXCODES = ('L', 'A', 'S')
 
 # Utility: Load .nii file
 
 def read_nii(filepath):
     ct_scan = nib.load(filepath)
-    if aff2axcodes(ct_scan.affine) != target_axcodes:
-          ct_scan = nib.as_closest_canonical(ct_scan)
-    array = ct_scan.get_fdata()
-    array = np.rot90(np.array(array))
-    return array
+    orig_axcodes = aff2axcodes(ct_scan.affine)
+    current_ornt = io_orientation(ct_scan.affine)
+    target_ornt  = axcodes2ornt(TARGET_AXCODES)
+    transform    = ornt_transform(current_ornt, target_ornt)
+
+    img_las = ct_scan.as_reoriented(transform)  
+    data    = img_las.get_fdata()
+    data = np.rot90(np.array(data))
+
+    if orig_axcodes == ('R', 'A', 'S'):
+        data = np.flip(data, axis=1) 
+
+    return data
+    # if aff2axcodes(ct_scan.affine) != target_axcodes:
+    #       ct_scan = nib.as_closest_canonical(ct_scan)
+    # array = ct_scan.get_fdata()
+    # array = np.rot90(np.array(array))
+    # return array
 
 
 # Window settings
@@ -45,7 +60,9 @@ dicom_windows = types.SimpleNamespace(
     lungs=(1500, -600),
     mediastinum=(350, 50),
     abdomen_soft=(400, 50),
-    liver=(76, 94),
+    # liver=(76, 94),
+    liver=(101,117),
+    liver_tumor=(60.2,61.5),
     spine_soft=(250, 50),
     spine_bone=(1800, 400),
     custom=(200, 60)
@@ -69,7 +86,7 @@ def windowed(self: Tensor, w, l):
 
 @patch
 def freqhist_bins(self: Tensor, n_bins=100):
-    imsd = self.view(-1).sort()[0]
+    imsd = self.reshape(-1).sort()[0]
     t = torch.cat([tensor([0.001]),
                    torch.arange(n_bins).float() / n_bins + (1 / 2 / n_bins),
                    tensor([0.999])])
@@ -148,6 +165,7 @@ def preprocess_liver_dataset(dataset_path, output_image_dir='train_images', outp
         curr_mask = read_nii(mask_path)
         curr_file_name = row["filename"].split('.')[0]
         curr_dim = curr_ct.shape[2]
+        
 
         valid_slices = []
         for curr_slice in range(curr_dim):
@@ -170,12 +188,13 @@ def preprocess_liver_dataset(dataset_path, output_image_dir='train_images', outp
             mask_filename  = f"{curr_file_name}_slice_{final_slice_idx}_mask.png"
 
             data.save_jpg(Path(output_image_dir) / image_filename,
-                          [dicom_windows.liver, dicom_windows.custom])
+                          [dicom_windows.liver, dicom_windows.liver_tumor])
             processed_mask.save(Path(output_mask_dir) / mask_filename)
 
     print("✅ Preprocessing complete.")
 
 
 if __name__ == '__main__':
-    dataset_path = "/mnt/c/Users/Elaine/Downloads/archive" # Modify this path
-    preprocess_liver_dataset(dataset_path)
+    # dataset_path = "../../Downloads/litsTiny"
+    dataset_path = "../../Downloads/archive"
+    preprocess_liver_dataset(dataset_path,output_image_dir='train_images_v2Window',output_mask_dir='train_masks_v2Window')

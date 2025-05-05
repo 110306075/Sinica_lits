@@ -8,12 +8,25 @@ from fastai.vision.all import *
 N_FOLDS = 5
 
 def build_metadata(img_dir='./train_images', mask_dir='./train_masks',
-                   n_folds=N_FOLDS, seed=42):
+                   n_folds=N_FOLDS, seed=42,filter_tumor_size_path=None):
+    
     img_dir, mask_dir = Path(img_dir), Path(mask_dir)
     imgs  = sorted(img_dir.glob('*.jpg'))
+
+
+    if filter_tumor_size_path:
+        with open(filter_tumor_size_path, 'r') as f:
+            valid_keywords = set(line.strip() for line in f)
+        print(len(valid_keywords))
+        imgs = [img for img in imgs if img.stem in valid_keywords]
+
+
+    # img_dir, mask_dir = Path(img_dir), Path(mask_dir)
+    # imgs  = sorted(img_dir.glob('*.jpg'))
     masks = [mask_dir/f'{p.stem}_mask.png' for p in imgs]
 
     df = pd.DataFrame({'image': imgs, 'mask': masks})
+    print("shape of training data",df.shape)
 
     kf = KFold(n_splits=n_folds, shuffle=True, random_state=seed)
     fold_col = np.zeros(len(df), dtype=int)
@@ -53,8 +66,8 @@ def foreground_acc(inp, targ, bkg_idx=0, axis=1):  # exclude a background from m
 def cust_foreground_acc(inp, targ):  # # include a background into the metric
     return foreground_acc(inp=inp, targ=targ, bkg_idx=3, axis=1) # 3 is a dummy value to include the background which is 0
 
-def train_and_eval_all_folds(n_folds=N_FOLDS):
-    df = build_metadata(n_folds=n_folds)
+def train_and_eval_all_folds(n_folds=N_FOLDS,case = 'liver_seg',filter_tumor_size_path=None,img_dir='train_images',mask_dir='train_masks'):
+    df = build_metadata(n_folds=n_folds,filter_tumor_size_path=filter_tumor_size_path,img_dir=img_dir,mask_dir=mask_dir)
     results = []
 
     for fold in range(n_folds):
@@ -71,6 +84,8 @@ def train_and_eval_all_folds(n_folds=N_FOLDS):
             cbs=[SaveModelCallback(fname=f'best_fold{fold}'),
                  EarlyStoppingCallback(patience=5)]
         )
+        learn.export(f'models/{case}model_fold{fold}.pkl')
+
 
         preds, _ = learn.get_preds(dl=dls.valid)
         preds = preds.argmax(1).cpu().numpy()
@@ -102,14 +117,14 @@ def train_and_eval_all_folds(n_folds=N_FOLDS):
             })
 
 
-        print(f'✅ Fold {fold} – Avg Liver Dice: {np.mean(fold_liver_dices):.4f}  Avg Tumor Dice: {np.mean(fold_tumor_dices):.4f}')
+        print(f'Fold {fold} – Avg Liver Dice: {np.mean(fold_liver_dices):.4f}  Avg Tumor Dice: {np.mean(fold_tumor_dices):.4f}')
 
     result_df = pd.DataFrame(results)
     print('\n=== Dice scores by image ===')
     print(result_df.head())
-    result_df.to_csv('dice_results.csv', index=False)
+    result_df.to_csv(f'{case}_dice_results.csv', index=False)
     return result_df
 
 # --------------------------------------------------
 if __name__ == '__main__':
-    result_df = train_and_eval_all_folds()
+    result_df = train_and_eval_all_folds(case='large_tumor',filter_tumor_size_path='./large_tumor_slices.txt',img_dir='train_images_v2Window',mask_dir='train_masks_v2Window')
