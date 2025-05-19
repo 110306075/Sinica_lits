@@ -1,35 +1,98 @@
-import numpy as np, pandas as pd, cv2
+# import numpy as np, pandas as pd, cv2
+# from pathlib import Path
+# from PIL import Image
+# from sklearn.model_selection import KFold
+# from fastai.vision.all import *
+
+
+# N_FOLDS = 5
+
+# def build_metadata(img_dir='./train_images', mask_dir='./train_masks',
+#                    n_folds=N_FOLDS, seed=42,filter_tumor_size_path=None,filter_out=None):
+    
+#     img_dir, mask_dir = Path(img_dir), Path(mask_dir)
+#     imgs  = sorted(img_dir.glob('*.jpg'))
+#     # print(imgs[0].stem)
+    
+
+
+#     if filter_tumor_size_path:
+#         with open(filter_tumor_size_path, 'r') as f:
+#             valid_keywords = set(line.strip() for line in f)
+#         print(len(valid_keywords))
+#         if filter_out:
+#              imgs = [img for img in imgs if img.stem  not in valid_keywords]
+
+#         else:
+#              imgs = [img for img in imgs if img.stem in valid_keywords]
+
+
+#     # img_dir, mask_dir = Path(img_dir), Path(mask_dir)
+#     # imgs  = sorted(img_dir.glob('*.jpg'))
+#     masks = [mask_dir/f'{p.stem}_mask.png' for p in imgs]
+
+#     df = pd.DataFrame({'image': imgs, 'mask': masks})
+#     print("shape of training data",df.shape)
+
+
+
+# build_metadata(filter_tumor_size_path='./small_tumor_slices.txt',filter_out=True)
+# build_metadata()
+
+
+import numpy as np
+import pandas as pd
+import re
 from pathlib import Path
 from PIL import Image
-from sklearn.model_selection import KFold
+import cv2
+from sklearn.model_selection import GroupKFold
 from fastai.vision.all import *
-
+from test_case_split import extract_case_ids
 
 N_FOLDS = 5
 
+
 def build_metadata(img_dir='./train_images', mask_dir='./train_masks',
-                   n_folds=N_FOLDS, seed=42,filter_tumor_size_path=None):
-    
+                   slice_list_txt=None, n_folds=N_FOLDS, seed=42):
+    """
+    Build a DataFrame of image-mask pairs, filter by case_ids from slice_list_txt,
+    and assign fold indices using GroupKFold by case_id.
+    """
     img_dir, mask_dir = Path(img_dir), Path(mask_dir)
-    imgs  = sorted(img_dir.glob('*.jpg'))
-    # print(imgs[0].stem)
-    
+    imgs = sorted(img_dir.glob('*.jpg'))
+
+    # Filter images by case_ids if provided
+    if slice_list_txt:
+        valid_cases, test_sets = extract_case_ids(slice_list_txt)
+        # print("the train case is:",valid_cases)
+        print("the test set is :", test_sets)
+        def get_case_id(path):
+            m = re.search(r'volume-(\d+)_slice_\d+', path.stem)
+            return m.group(1) if m else None
+        imgs = [p for p in imgs if get_case_id(p) in valid_cases]
+        print(len(imgs))
 
 
-    if filter_tumor_size_path:
-        with open(filter_tumor_size_path, 'r') as f:
-            valid_keywords = set(line.strip() for line in f)
-        print(len(valid_keywords))
-        imgs = [img for img in imgs if img.stem in valid_keywords]
-
-
-    # img_dir, mask_dir = Path(img_dir), Path(mask_dir)
-    # imgs  = sorted(img_dir.glob('*.jpg'))
     masks = [mask_dir/f'{p.stem}_mask.png' for p in imgs]
+    case_ids = [re.search(r'volume-(\d+)_slice_\d+', p.stem).group(1) for p in imgs]
 
-    df = pd.DataFrame({'image': imgs, 'mask': masks})
-    print("shape of training data",df.shape)
+    df = pd.DataFrame({
+        'image': imgs,
+        'mask': masks,
+        'case_id': case_ids
+    })
+    print(f"Total slices after filtering: {len(df)}")
 
+    # Assign folds by grouping on case_id
+    gkf = GroupKFold(n_splits=n_folds)
+    df['fold'] = -1
+    for fold, (_, val_idx) in enumerate(gkf.split(df, groups=df['case_id'])):
+        df.loc[val_idx, 'fold'] = fold
 
+    return df
 
-build_metadata(filter_tumor_size_path='./small_tumor_slices.txt')
+df = build_metadata(img_dir='train_images_v2Window', mask_dir='train_masks_v2Window',slice_list_txt='./large_tumor_slices.txt')
+print(df.head())
+print(df['fold'].nunique())
+print(df['fold'].value_counts())
