@@ -10,9 +10,10 @@ from test_case_split import extract_case_ids
 
 N_FOLDS = 5
 
+GLOBAL_TEST_SET = ['51','88','109','101','50','75','64','108','57','100']
 
 def build_metadata(img_dir='./train_images', mask_dir='./train_masks',
-                   slice_list_txt=None, rm_specific_slice=None, n_folds=N_FOLDS, seed=42):
+                   slice_list_txt=None, rm_specific_slice=None, is_slice_file=None,test_set=None, n_folds=N_FOLDS, seed=42):
     """
     Build a DataFrame of image-mask pairs, filter by case_ids from slice_list_txt,
     and assign fold indices using GroupKFold by case_id.
@@ -26,7 +27,7 @@ def build_metadata(img_dir='./train_images', mask_dir='./train_masks',
             invalid_slices = {line.strip() for line in f}
 
     if slice_list_txt:
-        valid_cases, test_sets = extract_case_ids(slice_list_txt)
+        valid_cases, test_sets = extract_case_ids(slice_list_txt,is_slice_file,test_set)
         # print("the train case is:",valid_cases)
         print("the test set is :", test_sets)
         def get_case_id(path):
@@ -90,25 +91,50 @@ def cust_foreground_acc(inp, targ):
 def train_and_eval_all_folds(n_folds=N_FOLDS, case='liver_seg',
                              slice_list_txt=None,
                              rm_specific_slice=None,
+                             is_slice_file=None,
+                             test_set=None,
                              img_dir='train_images', mask_dir='train_masks'):
     df = build_metadata(img_dir=img_dir, mask_dir=mask_dir,
-                        slice_list_txt=slice_list_txt, rm_specific_slice=rm_specific_slice, n_folds=n_folds)
+                        slice_list_txt=slice_list_txt,
+                        rm_specific_slice=rm_specific_slice, 
+                        is_slice_file=is_slice_file,
+                        test_set=test_set,
+                        n_folds=n_folds)
+    
+    dummy_dls = get_dls(df, fold=0)
+    learn = unet_learner(
+        dummy_dls, resnet50,
+        loss_func=CrossEntropyLossFlat(axis=1),
+        metrics=[foreground_acc, cust_foreground_acc]
+    )
+
     results = []
 
     for fold in range(n_folds):
         print(f"\nFold {fold}")
+
+        # reload for each fold
+        # dls = get_dls(df, fold)
+        # learn = unet_learner(
+        #     dls, resnet50,
+        #     loss_func=CrossEntropyLossFlat(axis=1),
+        #     metrics=[foreground_acc, cust_foreground_acc]
+        # )
+
+        # no relaod
         dls = get_dls(df, fold)
-        learn = unet_learner(
-            dls, resnet50,
-            loss_func=CrossEntropyLossFlat(axis=1),
-            metrics=[foreground_acc, cust_foreground_acc]
-        )
+        learn.dls = dls
+
         learn.fine_tune(
             100, wd=0.1,
-            cbs=[SaveModelCallback(fname=f'best_fold{fold}'),
-                 EarlyStoppingCallback(patience=8)]
+            cbs=[SaveModelCallback(fname=f'{case}_best_fold{fold}'),
+                 EarlyStoppingCallback(patience=8)
+                ]
         )
-        learn.export(f'models/{case}_fold{fold}.pkl')
+
+        learn.load(f'{case}_best_fold{fold}')
+
+        learn.export(f'models/{case}_best_fold{fold}.pkl')
 
         preds, _ = learn.get_preds(dl=dls.valid)
         preds = preds.argmax(1).cpu().numpy()
@@ -139,9 +165,11 @@ def train_and_eval_all_folds(n_folds=N_FOLDS, case='liver_seg',
 
 if __name__ == '__main__':
     df = train_and_eval_all_folds(
-        case='large_tumor_and_liver_bycase_omitsmallslice',
-        slice_list_txt='./large_tumor_slices.txt',
+        case='0601_large_tumor_and_liver_bycase_new_save_best_model_Reload',
+        slice_list_txt='large_tumor_case_new.txt',
+        is_slice_file = None,
+        test_set=GLOBAL_TEST_SET,
         img_dir='train_images_v2Window',
         mask_dir='train_masks_v2Window',
-        rm_specific_slice = 'small_tumor_slices.txt'
+        # rm_specific_slice = 'small_tumor_slices.txt'
     )

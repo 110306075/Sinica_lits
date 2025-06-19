@@ -6,9 +6,9 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 
 
-
 # ---- Configuration ----
-MODEL_PKL = "models/large_tumor_and_liver_bycase_omitsmallslice_fold3.pkl"
+MODEL_NAME = "0601_large_tumor_and_liver_bycase_new_save_best_model_Reload_best_fold4.pkl"
+MODEL_PKL = f"models/{MODEL_NAME}"
 # INPUT_IMG = "train_images_v2Window/volume-27_slice_551.jpg"        # input CT slice
 # GT_MASK   = "train_masks_v2Window/volume-27_slice_551_mask.png"   # ground-truth mask
 IMG_DIR     = Path("train_images_v2Window")
@@ -16,7 +16,9 @@ MASK_DIR    = Path("train_masks_v2Window")
 # VOLUME_ID   = 27
 LIVER_CLASS_IDX = 1  
 TUMOR_CLASS_INDX = 2                           
-TEST_INDEX = [27, 76, 9, 123, 44, 45, 50, 19, 110, 124]
+TEST_INDEX = [51,88,109,101,50,75,64,108,57,100]
+
+
 
 def dice(pred, target,class_idx, eps=1e-6):
     pred_bin = (pred == class_idx).astype(np.uint8)
@@ -36,9 +38,12 @@ def cust_foreground_acc(inp, targ):  # # include a background into the metric
     return foreground_acc(inp=inp, targ=targ, bkg_idx=3, axis=1)
 
 
+
 # ---- Load model ----
 learn = load_learner(MODEL_PKL)
 learn.model = learn.model.cuda()
+
+summaries = []
 
 for i in TEST_INDEX:
 
@@ -93,18 +98,46 @@ for i in TEST_INDEX:
 
         # print(f"Slice {slice_id}: Dice={d:.4f}, PredVoxels={pv}, GTVoxels={gv}")
 
+    avg_liver_dice   = np.mean(dice_scores_liver)  if dice_scores_liver else 0
+    avg_tumor_dice   = np.mean(dice_scores_tumor)  if dice_scores_tumor else 0
+    total_pred_l     = sum(pred_voxels_liver)
+    total_gt_l       = sum(gt_voxels_liver)
+    total_pred_t     = sum(pred_voxels_tumor)
+    total_gt_t       = sum(gt_voxels_tumor)
+
+    # append a dict for this case
+    summaries.append({
+        'case_id':             f"volume-{i}",
+        'Avg_liver_dice':      avg_liver_dice,
+        'Avg_tumor_dice':      avg_tumor_dice,
+        'pred_liver_voxel':    total_pred_l,
+        'gt_liver_voxel':      total_gt_l,
+        'liver_diff_abs':      abs(total_pred_l - total_gt_l),
+        'pred_tumor_voxel':    total_pred_t,
+        'gt_tumor_voxel':      total_gt_t,
+        'tumor_diff_abs':      abs(total_pred_t - total_gt_t),
+    })
+
+    # optional: still print to console
+    print(f"volume-{i}  liver Dice avg {avg_liver_dice:.4f}, tumor Dice avg {avg_tumor_dice:.4f}")
+
+# build DataFrame and export
+df = pd.DataFrame(summaries)
+df.to_csv(f"./global_test_result/{MODEL_NAME}_segmentation_test_summary.csv", index=False)
+print("Wrote segmentation_summary.csv with", len(df), "rows.")
+
     # 4) Summary
-    dice_arr_l = np.array(dice_scores_liver)
-    dice_arr_t = np.array(dice_scores_tumor)
-    print(f"\n=== Summary for volume-{i} ===")
-    print("for liver: ")
-    print(f"Dice   → avg: {dice_arr_l.mean():.4f}, max: {dice_arr_l.max():.4f}, min: {dice_arr_l.min():.4f}")
-    print(f"Total Predicted Voxels (class {LIVER_CLASS_IDX}): {sum(pred_voxels_liver)}")
-    print(f"Total GT Voxels       (class {LIVER_CLASS_IDX}): {sum(gt_voxels_liver)}")
-    print("for tumor: ")
-    print(f"Dice   → avg: {dice_arr_t.mean():.4f}, max: {dice_arr_t.max():.4f}, min: {dice_arr_t.min():.4f}")
-    print(f"Total Predicted Voxels (class {TUMOR_CLASS_INDX}): {sum(pred_voxels_tumor)}")
-    print(f"Total GT Voxels       (class {TUMOR_CLASS_INDX}): {sum(gt_voxels_tumor)}")
+    # dice_arr_l = np.array(dice_scores_liver)
+    # dice_arr_t = np.array(dice_scores_tumor)
+    # print(f"\n=== Summary for volume-{i} ===")
+    # print("for liver: ")
+    # print(f"Dice   → avg: {dice_arr_l.mean():.4f}, max: {dice_arr_l.max():.4f}, min: {dice_arr_l.min():.4f}")
+    # print(f"Total Predicted Voxels (class {LIVER_CLASS_IDX}): {sum(pred_voxels_liver)}")
+    # print(f"Total GT Voxels       (class {LIVER_CLASS_IDX}): {sum(gt_voxels_liver)}")
+    # print("for tumor: ")
+    # print(f"Dice   → avg: {dice_arr_t.mean():.4f}, max: {dice_arr_t.max():.4f}, min: {dice_arr_t.min():.4f}")
+    # print(f"Total Predicted Voxels (class {TUMOR_CLASS_INDX}): {sum(pred_voxels_tumor)}")
+    # print(f"Total GT Voxels       (class {TUMOR_CLASS_INDX}): {sum(gt_voxels_tumor)}")
 
 
 #visualization

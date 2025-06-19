@@ -1,4 +1,6 @@
 *.csv
+*.pkl
+*.pth
 venv/
 train_images/
 train_masks/
